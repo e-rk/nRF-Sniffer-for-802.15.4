@@ -410,8 +410,9 @@ class Nrf802154Sniffer(object):
 
         parser.add_argument("--channel", help="IEEE 802.15.4 capture channel [11-26]")
         parser.add_argument("--dev", help="Serial device connected to the sniffer")
+        parser.add_argument("--extcap-version", help="Used to identify the version of Wireshark used")
 
-        result = parser.parse_args()
+        result, unknown = parser.parse_known_args()
 
         if result.capture and not result.dev:
             parser.error("--dev is required if --capture is present")
