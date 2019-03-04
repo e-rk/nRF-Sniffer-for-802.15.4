@@ -325,7 +325,7 @@ class Nrf802154Sniffer(object):
 
         while self.running.is_set():
             try:
-                self.serial = Serial(dev, timeout=1)
+                self.serial = Serial(dev, timeout=1, exclusive=True)
                 break
             except Exception as e:
                 self.logger.debug("Can't open serial device: {} reason: {}".format(dev, e))

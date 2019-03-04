@@ -64,7 +64,11 @@ Ensure that Python directory is included in your `PATH` system environment varia
 ### Decryption key
 
 In order to decode packets exchanged on the Thread network it is necessary to configure the Wireshark to use correct decryption keys.
-To set decryption keys go to `Edit -> Preferences... -> Protocols -> IEEE 802.15.4 -> Decryption Keys`. The default decryption key used by nRF5 SDK for Thread and Zigbee examples is `00112233445566778899aabbccddeeff`. Set decryption key index to `0` and `Key hash` to `Thread hash` value.
+To set decryption keys go to `Edit -> Preferences... -> Protocols -> IEEE 802.15.4 -> Decryption Keys`.
+Configure the following values:
+* Decryption key: `00112233445566778899aabbccddeeff` (default value used by the Nordic Thread and Zigbee SDK examples)
+* Decryption key index:`0`
+* Key hash: `Thread hash`
 
 ### CoAP port configuration
 
@@ -107,7 +111,6 @@ sudo cp nrf802154_sniffer/nrf802154_sniffer.lua /usr/lib/x86_64-linux-gnu/wiresh
 ### Modify extcap script
 Modify `nrf802154_sniffer.py`:
 
-`sudo nano /usr/lib/x86_64-linux-gnu/wireshark/extcap/nrf802154_sniffer.py`
 - Uncomment line 64:
     ```python
     DLT='user'
@@ -116,3 +119,62 @@ Modify `nrf802154_sniffer.py`:
     ```python
     #DLT='802.15.4'
     ```
+
+## Troubleshooting
+
+##### Sniffer capture hangs when another Wireshark process is started with nRF BLE sniffer extcap on Linux
+This issue is caused by BLE sniffer extcap, which discovers connected sniffers during Wireshark startup by actively sending data to all serial ports.
+Applications written for Linux primarily use advisory locking, which may be ignored by other applications.
+Currently, the only way to avoid this issue is to disable the nRF BLE sniffer extcap by removing the executable flag:
+
+```bash
+sudo chmod -x <extcap_path>/nrf_sniffer.py
+```
+
+##### Sniffer capture hangs with `ModemManager` service enabled
+On some occasions the `ModemManager` may send AT commands to the sniffer. To avoid it do one of the following:
+* Disable `ModemManager` service
+```bash
+sudo systemctl stop ModemManager.service
+sudo systemctl disable ModemManager.service
+```
+* Create `udev` rule (for `DEFAULT` or `PARANOID` policy only):
+    1. Create new file in  in `/etc/udev/rules.d/99-nordic.rules` and write the text below:
+        ```
+        ACTION!="add", SUBSYSTEM!="usb_device", GOTO="rules_end"
+
+        ATTR{idProduct}=="154a", ATTR{idVendor}=="1915", MODE="666"
+        ATTR{idProduct}=="154a", ATTR{idVendor}=="1915", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+        LABEL="rules_end"
+        ```
+    2. Apply the new `udev` rules:
+        ```bash
+        udevadm trigger
+        ```
+    3. Verify that the settings have been successfully applied:
+        ```bash
+        udevadm info -q property -n /dev/ttyACMx
+        ```
+    4. Find the following values:
+        ```
+        ID_MM_CANDIDATE=0
+        ID_MM_DEVICE_IGNORE=1
+        ```
+    5. Restart the `ModemManager`:
+        ```bash
+        sudo systemctl restart ModemManager
+        ```
+    __Note__: The above steps will not work if `STRICT` policy is used.
+
+##### Sniffer interface does not appear in the Wireshark on Linux
+You may not have sufficient permissions to access the serial device.
+On Ubuntu you have to add the user to the `dialout` group.
+To remedy this execute the following command:
+```bash
+sudo usermod -a -G dialout [user]
+```
+You may also have to add the user to the `wireshark` user group to start the capture:
+```bash
+sudo usermod -a -G wireshark [user]
+```
