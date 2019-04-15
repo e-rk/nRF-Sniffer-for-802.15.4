@@ -171,6 +171,9 @@ class Nrf802154Sniffer(object):
                     pass
 
             self.threads = alive_threads
+
+            if self.serial is not None:
+                self.serial.close()
         else:
             self.logger.warning("Asked to stop {} while it was already stopped".format(self))
 
