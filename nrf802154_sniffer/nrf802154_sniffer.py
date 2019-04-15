@@ -171,6 +171,7 @@ class Nrf802154Sniffer(object):
                     pass
 
             self.threads = alive_threads
+
         else:
             self.logger.warning("Asked to stop {} while it was already stopped".format(self))
 
@@ -406,6 +407,9 @@ class Nrf802154Sniffer(object):
             self.setup_done.set()  # In case it wasn't set before.
             if self.running.is_set():  # Another precaution.
                 self.stop_sig_handler()
+
+            if self.serial is not None:
+                self.serial.close()
 
     def fifo_writer(self, fifo, queue):
         """
