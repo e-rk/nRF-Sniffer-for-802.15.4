@@ -190,9 +190,7 @@ class Nrf802154Sniffer(object):
         """
         res = []
         res.append("extcap {version=0.7.2}{help=https://github.com/NordicSemiconductor/nRF-Sniffer-for-802.15.4}{display=nRF Sniffer for 802.15.4}")
-        for port in comports():
-            if port.vid == Nrf802154Sniffer.NORDICSEMI_VID and port.pid == Nrf802154Sniffer.SNIFFER_802154_PID:
-                res.append ("interface {value=%s}{display=nRF Sniffer for 802.15.4}" % (port.device,) )
+        res.append ("interface {value=%s}{display=nRF Sniffer for 802.15.4}" % ('/dev/pts/1',) )
 
         res.append("control {number=%d}{type=button}{role=logger}{display=Log}{tooltip=Show capture log}" % Nrf802154Sniffer.CTRL_ARG_LOGGER)
 
