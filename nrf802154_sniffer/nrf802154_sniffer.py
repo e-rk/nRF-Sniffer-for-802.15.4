@@ -64,7 +64,6 @@ from serial.tools.list_ports import comports
 
 
 class Nrf802154Sniffer(object):
-
     # Various options for pcap files: http://www.tcpdump.org/linktypes.html
     DLT_USER0 = 147
     DLT_IEEE802_15_4_NOFCS = 230
@@ -89,7 +88,8 @@ class Nrf802154Sniffer(object):
         self.running = threading.Event()
         self.setup_done = threading.Event()
         self.setup_done.clear()
-        self.logger = logging.getLogger(__name__)
+        self.logger2 = logging.getLogger(__name__)
+        self.logger2.setLevel(logging.DEBUG)
         self.dev = None
         self.channel = None
         self.dlt = None
@@ -107,9 +107,9 @@ class Nrf802154Sniffer(object):
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(fmt='%(process)5d: %(asctime)s [%(levelname)s] %(message)s')
         handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        self.logger2.addHandler(handler)
 
-        self.logger.info("Sniffer has started")
+        self.logger2.info("Sniffer has started")
 
     def correct_time(self, sniffer_timestamp):
         """
@@ -160,7 +160,7 @@ class Nrf802154Sniffer(object):
         """
         Function responsible for stopping the sniffer firmware and closing all threads.
         """
-        self.logger.debug("stop_sig_handler called - stopping all threads")
+        self.logger2.debug("stop_sig_handler called - stopping all threads")
         # Let's wait with closing afer we're sure that the sniffer started. Protects us
         # from very short tests (NOTE: the serial_reader has a delayed start).
         while self.running.is_set() and not self.setup_done.is_set():
@@ -175,27 +175,27 @@ class Nrf802154Sniffer(object):
 
             for thread in self.threads:
                 try:
-                    self.logger.debug("Attempting to close {}".format(thread.name))
+                    self.logger2.debug("Attempting to close {}".format(thread.name))
                     thread.join(timeout=10)
                     if thread.is_alive() is True:
-                        self.logger.error("Failed to stop thread {}".format(thread.name))
+                        self.logger2.error("Failed to stop thread {}".format(thread.name))
                         alive_threads.append(thread)
                 except RuntimeError:
                     # TODO: This may be called from one of threads from thread list - architecture problem
-                    self.logger.debug("Couldn't close thread {}, attempted to close from {}".format(thread.name, threading.current_thread().getName()))
+                    self.logger2.debug("Couldn't close thread {}, attempted to close from {}".format(thread.name, threading.current_thread().getName()))
 
             self.threads = alive_threads
-            self.logger.debug("Threads left alive: {}".format(self.threads))
+            self.logger2.debug("Threads left alive: {}".format(self.threads))
         else:
-            self.logger.warning("Asked to stop {} while it was already stopped".format(self))
+            self.logger2.warning("Asked to stop {} while it was already stopped".format(self))
 
         if self.serial is not None:
-            self.logger.debug("Serial interface is initialized - checking if it is open")
+            self.logger2.debug("Serial interface is initialized - checking if it is open")
             if self.serial.is_open is True:
-                self.logger.debug("Serial interface is open - closing...")
+                self.logger2.debug("Serial interface is open - closing...")
                 self.serial.close()
             self.serial = None
-        self.logger.debug("Serial interface closed - exiting stop_sig_handler")
+        self.logger2.debug("Serial interface closed - exiting stop_sig_handler")
 
     @staticmethod
     def get_hex_path():
@@ -215,7 +215,7 @@ class Nrf802154Sniffer(object):
         res.append("extcap {version=0.7.2}{help=https://github.com/NordicSemiconductor/nRF-Sniffer-for-802.15.4}{display=nRF Sniffer for 802.15.4}")
         for port in comports():
             if port.vid == Nrf802154Sniffer.NORDICSEMI_VID and port.pid == Nrf802154Sniffer.SNIFFER_802154_PID:
-                res.append ("interface {value=%s}{display=nRF Sniffer for 802.15.4}" % (port.device,) )
+                res.append("interface {value=%s}{display=nRF Sniffer for 802.15.4}" % (port.device,))
 
         res.append("control {number=%d}{type=button}{role=logger}{display=Log}{tooltip=Show capture log}" % Nrf802154Sniffer.CTRL_ARG_LOGGER)
 
@@ -242,22 +242,22 @@ class Nrf802154Sniffer(object):
         """
         args = []
         values = []
-        res =[]
+        res = []
 
-        args.append ( (0, '--channel', 'Channel', 'IEEE 802.15.4 channel', 'selector', '{required=true}{default=11}') )
-        args.append ( (1, '--metadata', 'Out-Of-Band meta-data',
-                          'Packet header containing out-of-band meta-data for channel, RSSI and LQI',
-                          'selector', '{default=none}') )
+        args.append((0, '--channel', 'Channel', 'IEEE 802.15.4 channel', 'selector', '{required=true}{default=11}'))
+        args.append((1, '--metadata', 'Out-Of-Band meta-data',
+                     'Packet header containing out-of-band meta-data for channel, RSSI and LQI',
+                     'selector', '{default=none}'))
 
         if len(option) <= 0:
             for arg in args:
                 res.append("arg {number=%d}{call=%s}{display=%s}{tooltip=%s}{type=%s}%s" % arg)
 
-            values = values + [ (0, "%d" % i, "%d" % i, "true" if i == 11 else "false" ) for i in range(11,27) ]
+            values = values + [(0, "%d" % i, "%d" % i, "true" if i == 11 else "false") for i in range(11, 27)]
 
-            values.append ( (1, "none", "None", "true") )
-            values.append ( (1, "ieee802154-tap", "IEEE 802.15.4 TAP", "false") )
-            values.append ( (1, "user", "Custom Lua dissector", "false") )
+            values.append((1, "none", "None", "true"))
+            values.append((1, "ieee802154-tap", "IEEE 802.15.4 TAP", "false"))
+            values.append((1, "user", "Custom Lua dissector", "false"))
 
         for value in values:
             res.append("value {arg=%d}{value=%s}{display=%s}{default=%s}" % value)
@@ -268,13 +268,13 @@ class Nrf802154Sniffer(object):
         Returns pcap header to be written into pcap file.
         """
         header = bytearray()
-        header += struct.pack('<L', int ('a1b2c3d4', 16 ))
-        header += struct.pack('<H', 2 ) # Pcap Major Version
-        header += struct.pack('<H', 4 ) # Pcap Minor Version
-        header += struct.pack('<I', int(0)) # Timezone
-        header += struct.pack('<I', int(0)) # Accurancy of timestamps
-        header += struct.pack('<L', int ('000000ff', 16 )) # Max Length of capture frame
-        header += struct.pack('<L', self.dlt) # DLT
+        header += struct.pack('<L', int('a1b2c3d4', 16))
+        header += struct.pack('<H', 2)  # Pcap Major Version
+        header += struct.pack('<H', 4)  # Pcap Minor Version
+        header += struct.pack('<I', int(0))  # Timezone
+        header += struct.pack('<I', int(0))  # Accurancy of timestamps
+        header += struct.pack('<L', int('000000ff', 16))  # Max Length of capture frame
+        header += struct.pack('<L', self.dlt)  # DLT
         return header
 
     @staticmethod
@@ -291,10 +291,10 @@ class Nrf802154Sniffer(object):
         elif dlt == Nrf802154Sniffer.DLT_USER0:
             caplength += 6
 
-        pcap += struct.pack('<L', timestamp // 1000000 ) # Timestamp seconds
-        pcap += struct.pack('<L', timestamp % 1000000 ) # Timestamp microseconds
-        pcap += struct.pack('<L', caplength ) # Length captured
-        pcap += struct.pack('<L', caplength ) # Length in frame
+        pcap += struct.pack('<L', timestamp // 1000000)  # Timestamp seconds
+        pcap += struct.pack('<L', timestamp % 1000000)  # Timestamp microseconds
+        pcap += struct.pack('<L', caplength)  # Length captured
+        pcap += struct.pack('<L', caplength)  # Length in frame
 
         if dlt == Nrf802154Sniffer.DLT_IEEE802_15_4_TAP:
             # Append TLVs according to 802.15.4 TAP specification:
@@ -340,21 +340,21 @@ class Nrf802154Sniffer(object):
                     arg, typ, payload = Nrf802154Sniffer.control_read(fn)
 
                 self.stop_sig_handler()
-            self.logger.debug("control_reader is exiting")
+            self.logger2.debug("control_reader is exiting")
         except Exception as e:
-            self.logger.exception(e)
+            self.logger2.exception(e)
 
     def serial_write(self):
         """
         Function responsible for sending commands to serial port.
         """
         command = self.serial_queue.get(block=True, timeout=1)
-        self.logger.debug("Writing command: {}".format(command))
+        self.logger2.debug("Writing command: {}".format(command))
         try:
             self.serial.write(command + b'\r\n')
             self.serial.write(b'\r\n')
         except IOError:
-            self.logger.error("Cannot write to {}".format(self))
+            self.logger2.error("Cannot write to {}".format(self))
             self.running.clear()
 
     def serial_writer(self):
@@ -368,7 +368,7 @@ class Nrf802154Sniffer(object):
                 except Queue.Empty:
                     pass
 
-            self.logger.debug("serial_writer writing final commands")
+            self.logger2.debug("serial_writer writing final commands")
             # Write final commands and break out.
             while True:
                 try:
@@ -376,9 +376,9 @@ class Nrf802154Sniffer(object):
                 except Queue.Empty:
                     break
 
-            self.logger.debug("serial_writer is exiting")
+            self.logger2.debug("serial_writer is exiting")
         except Exception as e:
-            self.logger.exception(e)
+            self.logger2.exception(e)
 
     def serial_reader(self, dev, channel, queue):
         """
@@ -392,7 +392,7 @@ class Nrf802154Sniffer(object):
                     self.serial = Serial(dev, timeout=1, exclusive=True)
                     break
                 except Exception as e:
-                    self.logger.debug("Can't open serial device: {} reason: {}".format(dev, e))
+                    self.logger2.debug("Can't open serial device: {} reason: {}".format(dev, e))
                     time.sleep(0.5)
 
             try:
@@ -411,8 +411,8 @@ class Nrf802154Sniffer(object):
 
                 if not all(cmd.decode() in init_res.decode() for cmd in init_cmd):
                     msg = "{} did not reply properly to setup commands. Please re-plug the device and make sure firmware is correct. " \
-                            "Recieved: {}\n".format(self, init_res)
-                    self.logger.error(msg)
+                          "Recieved: {}\n".format(self, init_res)
+                    self.logger2.error(msg)
 
                 self.serial_queue.put(b'receive')
                 self.setup_done.set()
@@ -437,22 +437,22 @@ class Nrf802154Sniffer(object):
                         buf = b''
 
             except (serialutil.SerialException, serialutil.SerialTimeoutException) as e:
-                self.logger.error("Cannot communicate with serial device: {} reason: {}".format(dev, e))
+                self.logger2.error("Cannot communicate with serial device: {} reason: {}".format(dev, e))
             finally:
-                self.logger.debug("serial reader is closing - checking if stop_sig_handler is necessary")
+                self.logger2.debug("serial reader is closing - checking if stop_sig_handler is necessary")
                 self.setup_done.set()  # In case it wasn't set before.
                 if self.running.is_set():  # Another precaution.
                     self.stop_sig_handler()
-            self.logger.debug("serial reader is exiting")
+            self.logger2.debug("serial reader is exiting")
         except Exception as e:
-            self.logger.exception(e)
+            self.logger2.exception(e)
 
     def fifo_writer(self, fifo, queue):
         """
         Thread responsible for writing packets into pcap file/fifo from queue.
         """
         try:
-            with open(fifo, 'wb', 0 ) as fh:
+            with open(fifo, 'wb', 0) as fh:
                 fh.write(self.pcap_header())
                 fh.flush()
 
@@ -468,8 +468,8 @@ class Nrf802154Sniffer(object):
                     except Queue.Empty:
                         pass
         except Exception as e:
-            self.logger.exception(e)
-        self.logger.debug("Fifo reader is exiting")
+            self.logger2.exception(e)
+        self.logger2.debug("Fifo reader is exiting")
 
     def extcap_capture(self, fifo, dev, channel, metadata=None, control_in=None, control_out=None):
         """
@@ -479,7 +479,7 @@ class Nrf802154Sniffer(object):
 
         if len(self.threads):
             msg = "Old threads were not joined properly"
-            self.logger.error(msg)
+            self.logger2.error(msg)
             raise RuntimeError(msg)
 
         packet_queue = Queue.Queue()
@@ -500,7 +500,7 @@ class Nrf802154Sniffer(object):
         if control_in:
             self.threads.append(threading.Thread(target=self.control_reader, args=(control_in,)))
         else:
-            self.logger.debug("control_in is not set - extcap will not stop if run with Wireshark")
+            self.logger2.debug("control_in is not set - extcap will not stop if run with Wireshark")
 
         self.threads.append(threading.Thread(target=self.serial_reader, args=(self.dev, self.channel, packet_queue), name="serial_reader"))
         self.threads.append(threading.Thread(target=self.serial_writer, name="serial_writer"))
@@ -524,7 +524,7 @@ class Nrf802154Sniffer(object):
         parser.add_argument("--extcap-dlts", help="Provide a list of dlts for the given interface", action="store_true")
         parser.add_argument("--extcap-config", help="Provide a list of configurations for the given interface", action="store_true")
         parser.add_argument("--extcap-reload-option", help="Reload elements for the given option")
-        parser.add_argument("--capture", help="Start the capture routine", action="store_true" )
+        parser.add_argument("--capture", help="Start the capture routine", action="store_true")
         parser.add_argument("--fifo", help="Use together with capture to provide the fifo to dump data to")
         parser.add_argument("--extcap-capture-filter", help="Used together with capture to provide a capture filter")
         parser.add_argument("--extcap-control-in", help="Used to get control messages from toolbar")
@@ -556,7 +556,7 @@ if is_standalone:
 
     if args.extcap_interfaces:
         print(sniffer_comm.extcap_interfaces())
-    
+
     if args.extcap_dlts:
         print(sniffer_comm.extcap_dlts())
 
