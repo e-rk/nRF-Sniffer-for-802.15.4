@@ -99,8 +99,11 @@ class Nrf802154Sniffer(object):
         self.first_local_timestamp = None
         self.first_sniffer_timestamp = None
 
+        if not os.path.isdir(os.path.expanduser("~/sniffer")):
+            os.mkdir(os.path.expanduser("~/sniffer"))
+
         timestr = time.strftime("%Y%m%d-%H%M%S")
-        handler = logging.FileHandler(os.path.expanduser("~/Sniffer_log_{}".format(timestr)))
+        handler = logging.FileHandler(os.path.expanduser("~/sniffer/Sniffer_log_{}".format(timestr)))
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(fmt='%(process)5d: %(asctime)s [%(levelname)s] %(message)s')
         handler.setFormatter(formatter)
