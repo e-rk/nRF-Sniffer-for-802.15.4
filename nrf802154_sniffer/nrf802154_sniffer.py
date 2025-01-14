@@ -113,6 +113,7 @@ class Nrf802154Sniffer:
         self.processes: list[Process] = []
         self.threads: list[Thread] = []
         self.connection_open_timeout = connection_open_timeout
+        self.windows_mode = is_standalone and os.name == "nt"
 
     @classmethod
     def serial_reader(
@@ -362,10 +363,10 @@ class Nrf802154Sniffer:
         return bytes(pcap)
 
     def append_process(self, target, args):
-        if is_standalone and os.name == "nt":
+        if self.windows_mode:
             # On Windows, Wireshark uses TerminateProcess, so we don't have to worry about cleaning up.
             # We can't use subprocesses, because those won't be terminated by the system.
-            self.threads.append(Thread(target=target, args=args))
+            self.threads.append(Thread(target=target, args=args, daemon=True))
             print("appended thread")
         else:
             # Otherwise, on other systems we should make an attempt at graceful cleanup.
@@ -374,7 +375,7 @@ class Nrf802154Sniffer:
             print("appended process")
 
     def start_processes(self):
-        procs = self.threads if (is_standalone and os.name == "nt") else self.processes
+        procs = self.threads if (self.windows_mode) else self.processes
         for process in procs:
             process.start()
 
@@ -420,6 +421,9 @@ class Nrf802154Sniffer:
             self.append_process(
                 target=self.control_reader, args=(control_in, self.queue)
             )
+
+        if control_out:
+            fh = open(control_out, "wb", 0)
 
         self.start_processes()
 
