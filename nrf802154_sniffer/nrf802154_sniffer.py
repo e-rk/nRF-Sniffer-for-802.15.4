@@ -426,7 +426,6 @@ class Nrf802154Sniffer:
             fifo.flush()
 
             while packet := self.queue.get():
-                sys.stderr.write("ev")
                 match packet:
                     case SnifferPacket(content, timestamp, lqi, rssi):
                         pcap = self.pcap_packet(
