@@ -366,10 +366,12 @@ class Nrf802154Sniffer:
             # On Windows, Wireshark uses TerminateProcess, so we don't have to worry about cleaning up.
             # We can't use subprocesses, because those won't be terminated by the system.
             self.threads.append(Thread(target=target, args=args))
+            print("appended thread")
         else:
             # Otherwise, on other systems we should make an attempt at graceful cleanup.
             # Given all the quirks, using subprocesses is the best bet at making things clean.
             self.processes.append(Process(target=target, args=args))
+            print("appended process")
 
     def start_processes(self):
         procs = self.threads if (is_standalone and os.name == "nt") else self.processes
