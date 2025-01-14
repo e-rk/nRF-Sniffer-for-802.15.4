@@ -67,7 +67,7 @@ class SnifferPacket:
     content: bytes
     timestamp: int
     lqi: int
-    power: int
+    rssi: int
 
 
 class ControlPacket:
@@ -110,13 +110,14 @@ class Nrf802154Sniffer:
         self.connection_open_timeout = connection_open_timeout
 
     @staticmethod
-    def reader(
-        file,
+    def serial_reader(
+        serial_port: str,
         queue: Queue,
         parser: Callable[[bytes], SnifferPacket | ControlPacket],
     ) -> None:
+        serial = Serial(serial_port, exclusive=True)
         while True:
-            value = file.readline()
+            value = serial.readline()
             try:
                 packet = parser(value)
                 queue.put(packet)
@@ -130,9 +131,9 @@ class Nrf802154Sniffer:
             packet = a2b_hex(m.group(1)[:-4])
             rssi = int(m.group(2))
             lqi = int(m.group(3))
-            timestamp = int(m.group(4)) & 0xFFFFFFFF
+            timestamp = int(m.group(4))
             return SnifferPacket(
-                content=packet, timestamp=timestamp, lqi=lqi, power=rssi
+                content=packet, timestamp=timestamp, lqi=lqi, rssi=rssi
             )
         else:
             raise Exception()
@@ -374,9 +375,12 @@ class Nrf802154Sniffer:
         serial.write(b"channel " + bytes(str(channel).encode()) + b"\r\n")
         serial.write(b"receive\r\n")
         serial.flush()
+        serial.close()
 
         self.processes.append(
-            Process(target=self.reader, args=(serial, self.queue, self.parse_packet))
+            Process(
+                target=self.serial_reader, args=(dev, self.queue, self.parse_packet)
+            )
         )
 
         for process in self.processes:
