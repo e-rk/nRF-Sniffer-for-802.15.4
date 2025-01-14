@@ -40,7 +40,6 @@ from ast import TypeAlias
 from enum import IntEnum
 import sys
 import os
-from typing_extensions import Callable
 
 is_standalone = __name__ == "__main__"
 
@@ -60,6 +59,7 @@ from serial import Serial, serialutil
 from serial.tools.list_ports import comports
 from multiprocessing import Queue, Process
 from dataclasses import dataclass
+from threading import Thread
 
 
 @dataclass
@@ -72,6 +72,10 @@ class SnifferPacket:
 
 class ControlPacket:
     content: bytes
+
+
+class ExitEvent:
+    pass
 
 
 class DLT(IntEnum):
@@ -107,19 +111,20 @@ class Nrf802154Sniffer:
         self.channel = None
         self.dlt = None
         self.processes: list[Process] = []
+        self.threads: list[Thread] = []
         self.connection_open_timeout = connection_open_timeout
 
-    @staticmethod
+    @classmethod
     def serial_reader(
+        cls,
         serial_port: str,
         queue: Queue,
-        parser: Callable[[bytes], SnifferPacket | ControlPacket],
     ) -> None:
         serial = Serial(serial_port, exclusive=True)
         while True:
             value = serial.readline()
             try:
-                packet = parser(value)
+                packet = cls.parse_packet(value)
                 queue.put(packet)
             except:
                 ...
@@ -137,6 +142,21 @@ class Nrf802154Sniffer:
             )
         else:
             raise Exception()
+
+    @classmethod
+    def control_reader(
+        cls,
+        control_in: str,
+        queue: Queue,
+    ) -> None:
+        with open(control_in, "rb", 0) as control_in_fifo:
+            try:
+                while True:
+                    value = control_in_fifo.read()
+                    sys.stderr.write(f"aaa{value}")
+            except:
+                sys.stderr.write(f"aaa")
+                queue.put(ExitEvent())
 
     @staticmethod
     def parse_control(value: bytes) -> ControlPacket:
@@ -341,6 +361,21 @@ class Nrf802154Sniffer:
 
         return bytes(pcap)
 
+    def append_process(self, target, args):
+        if is_standalone and os.name == "nt":
+            # On Windows, Wireshark uses TerminateProcess, so we don't have to worry about cleaning up.
+            # We can't use subprocesses, because those won't be terminated by the system.
+            self.threads.append(Thread(target=target, args=args))
+        else:
+            # Otherwise, on other systems we should make an attempt at graceful cleanup.
+            # Given all the quirks, using subprocesses is the best bet at making things clean.
+            self.processes.append(Process(target=target, args=args))
+
+    def start_processes(self):
+        procs = self.threads if (is_standalone and os.name == "nt") else self.processes
+        for process in procs:
+            process.start()
+
     def extcap_capture(
         self, fifo, dev, channel, metadata=None, control_in=None, control_out=None
     ):
@@ -377,31 +412,30 @@ class Nrf802154Sniffer:
         serial.flush()
         serial.close()
 
-        self.processes.append(
-            Process(
-                target=self.serial_reader, args=(dev, self.queue, self.parse_packet)
-            )
-        )
+        self.append_process(target=self.serial_reader, args=(dev, self.queue))
 
-        for process in self.processes:
-            process.start()
-
-        control = None
         if control_in:
-            control = open(control_in, "rb", 0)
+            self.append_process(
+                target=self.control_reader, args=(control_in, self.queue)
+            )
+
+        self.start_processes()
 
         with open(fifo, "wb", 0) as fifo:
-            print("setup")
             fifo.write(self.pcap_header())
             fifo.flush()
 
             while packet := self.queue.get():
+                sys.stderr.write("ev")
                 match packet:
                     case SnifferPacket(content, timestamp, lqi, rssi):
                         pcap = self.pcap_packet(
                             content, self.dlt, channel, rssi, lqi, timestamp
                         )
                         fifo.write(pcap)
+                    case ExitEvent():
+                        sys.stderr.write("exit event")
+                        self.stop()
 
     @staticmethod
     def parse_args():
