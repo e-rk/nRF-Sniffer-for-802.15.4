@@ -55,7 +55,7 @@ import time
 import logging
 from argparse import ArgumentParser
 from binascii import a2b_hex
-from serial import Serial, serialutil
+from serial import Serial, SerialException
 from serial.tools.list_ports import comports
 from multiprocessing import Queue, Process
 from dataclasses import dataclass
@@ -69,13 +69,14 @@ class SnifferPacket:
     lqi: int
     rssi: int
 
-
+@dataclass
 class ControlPacket:
     content: bytes
 
 
+@dataclass
 class ExitEvent:
-    pass
+    reason: str
 
 
 class DLT(IntEnum):
@@ -101,19 +102,30 @@ class Nrf802154Sniffer:
     TIMER_MAX = 2**32
 
     def __init__(self, connection_open_timeout=None):
-        self.serial = None
         self.queue = Queue()
-        self.running = threading.Event()
-        self.setup_done = threading.Event()
-        self.setup_done.clear()
         self.logger = logging.getLogger(__name__)
         self.dev = None
-        self.channel = None
-        self.dlt = None
+        self.channel = 11
+        self.dlt = DLT.DLT_IEEE802_15_4_TAP
         self.processes: list[Process] = []
         self.threads: list[Thread] = []
-        self.connection_open_timeout = connection_open_timeout
         self.windows_mode = is_standalone and os.name == "nt"
+        self.first_local_timestamp = None
+        self.first_sniffer_timestamp = None
+
+    def correct_time(self, sniffer_timestamp):
+        """
+        Sniffer timestamps are relative to device boot.
+        Wireshark expects the packets to have UNIX timestamp.
+        This function converts sniffer timestamps to UNIX time.
+        """
+        if self.first_local_timestamp is None:
+            # First received packets - set the reference time and convert to microseconds.
+            self.first_local_timestamp = int(time.time()*(10**6))
+            self.first_sniffer_timestamp = sniffer_timestamp
+            return self.first_local_timestamp
+        else:
+            return self.first_local_timestamp - self.first_sniffer_timestamp + sniffer_timestamp
 
     @classmethod
     def serial_reader(
@@ -123,12 +135,15 @@ class Nrf802154Sniffer:
     ) -> None:
         serial = Serial(serial_port, exclusive=True)
         while True:
-            value = serial.readline()
             try:
-                packet = cls.parse_packet(value)
-                queue.put(packet)
+                value = serial.readline()
+                try:
+                    packet = cls.parse_packet(value)
+                    queue.put(packet)
+                except:
+                    ...
             except:
-                ...
+                queue.put(ExitEvent(f"Sniffer device {serial_port} was disconnected."))
 
     @classmethod
     def parse_packet(cls, value: bytes) -> SnifferPacket:
@@ -154,53 +169,12 @@ class Nrf802154Sniffer:
             try:
                 while True:
                     value = control_in_fifo.read()
-                    sys.stderr.write(f"aaa{value}")
             except:
-                sys.stderr.write(f"aaa")
-                queue.put(ExitEvent())
+                queue.put(ExitEvent("Wireshark connection lost."))
 
     @staticmethod
     def parse_control(value: bytes) -> ControlPacket:
         return ControlPacket(content=value)
-
-    # def stop_sig_handler(self, *args, **kwargs):
-    #     """
-    #     Function responsible for stopping the sniffer firmware and closing all threads.
-    #     """
-    #     # Let's wait with closing afer we're sure that the sniffer started. Protects us
-    #     # from very short tests (NOTE: the serial_reader has a delayed start).
-    #     while self.running.is_set() and not self.setup_done.is_set():
-    #         time.sleep(1)
-
-    #     if self.running.is_set():
-    #         self.serial_queue.put(b"")
-    #         self.serial_queue.put(b"sleep")
-    #         self.running.clear()
-
-    #         alive_threads = []
-
-    #         for thread in self.threads:
-    #             try:
-    #                 thread.join(timeout=10)
-    #                 if thread.is_alive() is True:
-    #                     self.logger.error(
-    #                         "Failed to stop thread {}".format(thread.name)
-    #                     )
-    #                     alive_threads.append(thread)
-    #             except RuntimeError:
-    #                 # TODO: This may be called from one of threads from thread list - architecture problem
-    #                 pass
-
-    #         self.threads = alive_threads
-    #     else:
-    #         self.logger.warning(
-    #             "Asked to stop {} while it was already stopped".format(self)
-    #         )
-
-    #     if self.serial is not None:
-    #         if self.serial.is_open is True:
-    #             self.serial.close()
-    #         self.serial = None
 
     def stop_sig_handler(self, *args, **kwargs):
         self.stop()
@@ -209,6 +183,18 @@ class Nrf802154Sniffer:
     def stop(self):
         for process in self.processes:
             process.kill()
+            process.join()
+
+        self.processes = []
+        self.threads = []
+
+        try:
+            if self.dev:
+                serial = Serial(self.dev, exclusive=True)
+                serial.write(b"\r\n")
+                serial.write(b"sleep\r\n")
+        except SerialException:
+            pass
 
     @staticmethod
     def extcap_interfaces():
@@ -389,7 +375,6 @@ class Nrf802154Sniffer:
 
         self.channel = channel
         self.dev = dev
-        self.running.set()
 
         if metadata == "ieee802154-tap":
             # For Wireshark 3.0 and later
@@ -427,20 +412,27 @@ class Nrf802154Sniffer:
 
         self.start_processes()
 
-        with open(fifo, "wb", 0) as fifo:
-            fifo.write(self.pcap_header())
-            fifo.flush()
+        signal.signal(signal.SIGINT, sniffer_comm.stop_sig_handler)
+        signal.signal(signal.SIGTERM, sniffer_comm.stop_sig_handler)
 
-            while packet := self.queue.get():
-                match packet:
-                    case SnifferPacket(content, timestamp, lqi, rssi):
-                        pcap = self.pcap_packet(
-                            content, self.dlt, channel, rssi, lqi, timestamp
-                        )
-                        fifo.write(pcap)
-                    case ExitEvent():
-                        sys.stderr.write("exit event")
-                        self.stop()
+        try:
+            with open(fifo, "wb", 0) as fifo:
+                fifo.write(self.pcap_header())
+                fifo.flush()
+
+                while packet := self.queue.get():
+                    match packet:
+                        case SnifferPacket(content, timestamp, lqi, rssi):
+                            pcap = self.pcap_packet(
+                                content, self.dlt, channel, rssi, lqi, self.correct_time(timestamp)
+                            )
+                            fifo.write(pcap)
+                        case ExitEvent(reason):
+                            sys.stderr.write(reason)
+                            self.stop()
+                            break
+        except BrokenPipeError:
+            self.stop()
 
     @staticmethod
     def parse_args():
@@ -533,18 +525,11 @@ if is_standalone:
 
     if args.capture and args.fifo:
         channel = args.channel if args.channel else 11
-        signal.signal(signal.SIGINT, sniffer_comm.stop_sig_handler)
-        signal.signal(signal.SIGTERM, sniffer_comm.stop_sig_handler)
-        try:
-            sniffer_comm.extcap_capture(
-                args.fifo,
-                args.extcap_interface,
-                channel,
-                args.metadata,
-                args.extcap_control_in,
-                args.extcap_control_out,
-            )
-        except KeyboardInterrupt as e:
-            ...
-            print("dupa")
-        #     sniffer_comm.stop_sig_handler()
+        sniffer_comm.extcap_capture(
+            args.fifo,
+            args.extcap_interface,
+            channel,
+            args.metadata,
+            args.extcap_control_in,
+            args.extcap_control_out,
+        )
