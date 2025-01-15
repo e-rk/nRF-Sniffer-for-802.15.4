@@ -108,7 +108,6 @@ class Nrf802154Sniffer:
         self.channel = 11
         self.dlt = DLT.DLT_IEEE802_15_4_TAP
         self.processes: list[Process] = []
-        self.threads: list[Thread] = []
         self.windows_mode = is_standalone and os.name == "nt"
         self.first_local_timestamp = None
         self.first_sniffer_timestamp = None
@@ -186,13 +185,16 @@ class Nrf802154Sniffer:
             process.join()
 
         self.processes = []
-        self.threads = []
 
         try:
             if self.dev:
-                serial = Serial(self.dev, exclusive=True)
+                serial = Serial(self.dev, exclusive=True, timeout=0.1)
                 serial.write(b"\r\n")
                 serial.write(b"sleep\r\n")
+                serial.flush()
+                serial.read(100000)
+                serial.reset_input_buffer()
+                serial.close()
         except SerialException:
             pass
 
@@ -349,20 +351,12 @@ class Nrf802154Sniffer:
         return bytes(pcap)
 
     def append_process(self, target, args):
-        if self.windows_mode:
-            # On Windows, Wireshark uses TerminateProcess, so we don't have to worry about cleaning up.
-            # We can't use subprocesses, because those won't be terminated by the system.
-            self.threads.append(Thread(target=target, args=args, daemon=True))
-            print("appended thread")
-        else:
-            # Otherwise, on other systems we should make an attempt at graceful cleanup.
-            # Given all the quirks, using subprocesses is the best bet at making things clean.
-            self.processes.append(Process(target=target, args=args))
-            print("appended process")
+        # Given all the multiplatform quirks, using subprocesses is the
+        # best bet at making things somewhat clean.
+        self.processes.append(Process(target=target, args=args, daemon=True))
 
     def start_processes(self):
-        procs = self.threads if (self.windows_mode) else self.processes
-        for process in procs:
+        for process in self.processes:
             process.start()
 
     def extcap_capture(
@@ -389,9 +383,7 @@ class Nrf802154Sniffer:
         serial.write(b"sleep\r\n")
         serial.write(b"shell echo off\r\n")
         serial.flush()
-        # serial.reset_input_buffer()
-        while serial.readall():
-            pass
+        serial.readall()
         serial.close()
 
         serial = Serial(dev, exclusive=True)
